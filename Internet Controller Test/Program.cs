@@ -140,11 +140,13 @@ namespace InternetControllerTest {
 			for(int i = 4; i < sender.Address.Length; i++) dataUpdate += sender.Address[i].ToString("x").ToLower();
 
 			// Iterate through the data
-			int data_length = packet.Length - 18;
+			int data_length = packet.Length - 18;	// This is needed if the routers on in AT mode - they send the whole packet
+//			int data_length = packet.Length;		// This is needed if the routers are in API mode - they send only the data packet
 			if(data_length % 5 != 0) return;	// Something funny happened
 			else {
 				int num_sensors = data_length/5;
-				int byte_pos = 17;	// The starting point in the data to read the sensor data
+				int byte_pos = 17;	// The starting point in the data to read the sensor data in AT mode
+//				int byte_pos = 0;	// The staarting point in the data to read the sensor data in API mode
 				for(int cur_sensor = 0; cur_sensor < num_sensors; cur_sensor++) {
 					// Determine the type of reading
 					bool isPressure = false;
