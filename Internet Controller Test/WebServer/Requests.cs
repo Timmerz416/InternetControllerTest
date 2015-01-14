@@ -83,18 +83,18 @@ namespace InternetControllerTest {
 	public class ProgramOverrideArgs : RequestArgs {
 		private bool _turnOn;
 		private double _setting;
-		private double _length;
 
 		public ProgramOverrideArgs(char[] Data) : base(Data) {
+			// Check that there are 3 args
+			if(_args.Length != 3) throw new ArgumentException("Program Override Command requires 3 arguments");
+
 			// Check the args
-			if((_args[1].ToUpper() == "ON") && (_args.Length == 4)) {
+			if(_args[1].ToUpper() == "ON") {
 				_turnOn = true;
 				_setting = double.Parse(_args[2]);
-				_length = double.Parse(_args[3]);
-			} else if((_args[1].ToUpper() == "OFF") && (_args.Length == 2)) {
+			} else if(_args[1].ToUpper() == "OFF") {
 				_turnOn = false;
 				_setting = 0.0;
-				_length = -1.0;
 			} else throw new ArgumentException("Vacation Status Command '" + _command + "' Not Currently Handled.");
 		}
 

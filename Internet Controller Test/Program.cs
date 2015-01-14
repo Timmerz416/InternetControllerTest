@@ -20,11 +20,30 @@ namespace InternetControllerTest {
 		private static OutputPort controlLED = new OutputPort(Pins.GPIO_PIN_D7, false);	// Initially this is off
 		private static AnalogInput tmp36 = new AnalogInput(AnalogChannels.ANALOG_PIN_A0);	// Analog pin to read temperature
 
+		// Database address
 		private const string DB_ADDRESS = "192.168.2.53";	// The address to the server with the MySQL server
 
+		// XBee sensor codes
 		private enum XBeePortData { Temperature, Luminosity, Pressure, Humidity, LuminosityLux, HeatingOn, ThermoOn, Power }
 
+		// XBee connection
 		private static XBeeApi xBee;
+
+		// XBee command codes
+		const byte CMD_ACK			= 0;
+		const byte CMD_NACK			= 1;
+		const byte CMD_THERMO_POWER = 2;
+		const byte CMD_OVERRIDE		= 3;
+		const byte CMD_RULE_CHANGE	= 4;
+
+		// XBee subcommand codes
+		const byte STATUS_OFF		= 0;
+		const byte STATUS_ON		= 1;
+		const byte STATUS_GET		= 2;
+		const byte STATUS_ADD		= 3;
+		const byte STATUS_DELETE	= 4;
+		const byte STATUS_MOVE		= 5;
+		const byte STATUS_UPDATE	= 6;
 
 		public static void Main() {
 			// Create the Zigbee IO Sample Listener for automated data packets
@@ -140,13 +159,13 @@ namespace InternetControllerTest {
 			for(int i = 4; i < sender.Address.Length; i++) dataUpdate += sender.Address[i].ToString("x").ToLower();
 
 			// Iterate through the data
-			int data_length = packet.Length - 18;	// This is needed if the routers on in AT mode - they send the whole packet
-//			int data_length = packet.Length;		// This is needed if the routers are in API mode - they send only the data packet
+//			int data_length = packet.Length - 18;	// This is needed if the routers on in AT mode - they send the whole packet
+			int data_length = packet.Length;		// This is needed if the routers are in API mode - they send only the data packet
 			if(data_length % 5 != 0) return;	// Something funny happened
 			else {
 				int num_sensors = data_length/5;
-				int byte_pos = 17;	// The starting point in the data to read the sensor data in AT mode
-//				int byte_pos = 0;	// The staarting point in the data to read the sensor data in API mode
+//				int byte_pos = 17;	// The starting point in the data to read the sensor data in AT mode
+				int byte_pos = 0;	// The staarting point in the data to read the sensor data in API mode
 				for(int cur_sensor = 0; cur_sensor < num_sensors; cur_sensor++) {
 					// Determine the type of reading
 					bool isPressure = false;
@@ -223,10 +242,38 @@ namespace InternetControllerTest {
 
 			// Set the LED accordingly
 			controlLED.Write(txCmd.TurnOn);
+
+			// Create the command
+			XBeeAddress64 controller = new XBeeAddress64("00 13 A2 00 40 AE B9 7F");
+			byte[] cmd = { CMD_THERMO_POWER, txCmd.TurnOn ? STATUS_ON : STATUS_OFF };
+			TxRequest txTransmission = new TxRequest(controller, cmd);
+
+			// Create the command, and check that it was received
+			XBeeResponse response = xBee.Send(txTransmission).GetResponse();
+			Debug.Assert(response is TxStatusResponse);	// For debugging
+			TxStatusResponse txResponse = response as TxStatusResponse;
+			if(!txResponse.IsSuccess) Debug.Print("Error sending thermostat status command: " + txResponse.ToString());	// TODO - DEVELOP ERROR HANDLING CODE
+			else Debug.Print("Successfully sent thermostat status command");
 		}
 
 		static void server_programOverride(Socket client, RequestArgs request) {
-			throw new NotImplementedException();
+			// Cast the request args
+			ProgramOverrideArgs txCmd = (request is ProgramOverrideArgs) ? request as ProgramOverrideArgs : null;
+
+			// Create the command packet
+			byte[] tempArray = floatToByte((float) txCmd.Temperature);
+			byte[] cmd = { CMD_OVERRIDE, txCmd.TurnOn ? STATUS_ON : STATUS_OFF, tempArray[0], tempArray[1], tempArray[2], tempArray[3] };
+
+			// Create the command
+			XBeeAddress64 controller = new XBeeAddress64("00 13 A2 00 40 AE B9 7F");
+			TxRequest txTransmission = new TxRequest(controller, cmd);
+
+			// Create the command, and check that it was received
+			XBeeResponse response = xBee.Send(txTransmission).GetResponse();
+			Debug.Assert(response is TxStatusResponse);	// For debugging
+			TxStatusResponse txResponse = response as TxStatusResponse;
+			if(!txResponse.IsSuccess) Debug.Print("Error sending program override command: " + txResponse.ToString());	// TODO - DEVELOP ERROR HANDLING CODE
+			else Debug.Print("Successfully sent program override command");
 		}
 
 		static void server_thermoRuleChanged(Socket client, RequestArgs request) {
