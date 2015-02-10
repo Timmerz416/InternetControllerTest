@@ -35,6 +35,7 @@ namespace InternetControllerTest {
 		const byte CMD_THERMO_POWER = 2;
 		const byte CMD_OVERRIDE		= 3;
 		const byte CMD_RULE_CHANGE	= 4;
+		const byte CMD_SENSOR_DATA	= 5;
 
 		// XBee subcommand codes
 		const byte STATUS_OFF		= 0;
@@ -128,30 +129,40 @@ namespace InternetControllerTest {
 			}
 		}
 
-		private static unsafe float byteToFloat(byte[] byte_array) {
-			uint ret = (uint) (byte_array[0] << 0 | byte_array[1] << 8 | byte_array[2] << 16 | byte_array[3] << 24);
-			float r = *((float*) &ret);	// This should work?
-			return r;
-		}
-
-		private static unsafe byte[] floatToByte(float value) {
-			if(sizeof(uint) != 4) throw new Exception("uint is not a 4-byte variable on this system!");
-
-			uint asInt = *((uint*) &value);
-			byte[] byte_array = new byte[sizeof(uint)];
-
-			byte_array[0] = (byte) (asInt & 0xFF);
-			byte_array[1] = (byte) ((asInt >> 8) & 0xFF);
-			byte_array[2] = (byte) ((asInt >> 16) & 0xFF);
-			byte_array[3] = (byte) ((asInt >> 24) & 0xFF);
-
-			return byte_array;
-		}
-
 		static void xBee_DataReceived(XBeeApi receiver, byte[] data, XBeeAddress sender) {
 			// Format the data packet to remove 0x7d instances (assuming API mode is 2)
 			byte[] packet = Program.FormatApiMode(data);
 
+			// Determine the type of packet
+			switch(packet[0]) {
+				case CMD_RULE_CHANGE:
+					switch(packet[1]) {
+						case STATUS_GET:
+							ProcessGetRuleResults(packet);
+							break;
+						default:
+							Debug.Print("This rule request type has not been implemented yet.");
+							// TODO - DEVELOP ERROR HANDLING
+							break;
+					}
+					break;
+				case CMD_SENSOR_DATA:
+					UpdateSensorData(packet, sender);
+					break;
+				default:
+					Debug.Print("TxRequest type has not been implemented yet.");
+					// TODO - DEVELOP ERROR HANDLING
+					break;
+			}
+		}
+
+		private static void ProcessGetRuleResults(byte[] packetData) {
+			// Determine the number of rules
+			byte num_rules = packetData[2];
+			Debug.Print("A total of " + num_rules + " rules sent with a packet length of " + packetData.Length);
+		}
+
+		private static void UpdateSensorData(byte[] packetData, XBeeAddress sender) {
 			// Create the http request string
 			string dataUpdate = "GET /db_test_upload.php?radio_id=";
 
@@ -160,31 +171,31 @@ namespace InternetControllerTest {
 
 			// Iterate through the data
 //			int data_length = packet.Length - 18;	// This is needed if the routers on in AT mode - they send the whole packet
-			int data_length = packet.Length;		// This is needed if the routers are in API mode - they send only the data packet
+			int data_length = packetData.Length - 1;		// This is needed if the routers are in API mode - they send only the data packet
 			if(data_length % 5 != 0) return;	// Something funny happened
 			else {
 				int num_sensors = data_length/5;
 //				int byte_pos = 17;	// The starting point in the data to read the sensor data in AT mode
-				int byte_pos = 0;	// The staarting point in the data to read the sensor data in API mode
+				int byte_pos = 1;	// The staarting point in the data to read the sensor data in API mode
 				for(int cur_sensor = 0; cur_sensor < num_sensors; cur_sensor++) {
 					// Determine the type of reading
 					bool isPressure = false;
-					if(packet[byte_pos] == 0x01) dataUpdate += "&temperature=";
-					else if(packet[byte_pos] == 0x02) dataUpdate += "&luminosity=";
-					else if(packet[byte_pos] == 0x04) {
+					if(packetData[byte_pos] == 0x01) dataUpdate += "&temperature=";
+					else if(packetData[byte_pos] == 0x02) dataUpdate += "&luminosity=";
+					else if(packetData[byte_pos] == 0x04) {
 						dataUpdate += "&pressure=";
 						isPressure = true;
-					} else if(packet[byte_pos] == 0x08) dataUpdate += "&humidity=";
-					else if(packet[byte_pos] == 0x10) dataUpdate += "&power=";
-					else if(packet[byte_pos] == 0x20) dataUpdate += "&luminosity_lux=";
-					else if(packet[byte_pos] == 0x40) dataUpdate += "&heating_on=";
-					else if(packet[byte_pos] == 0x80) dataUpdate += "&thermo_on=";
+					} else if(packetData[byte_pos] == 0x08) dataUpdate += "&humidity=";
+					else if(packetData[byte_pos] == 0x10) dataUpdate += "&power=";
+					else if(packetData[byte_pos] == 0x20) dataUpdate += "&luminosity_lux=";
+					else if(packetData[byte_pos] == 0x40) dataUpdate += "&heating_on=";
+					else if(packetData[byte_pos] == 0x80) dataUpdate += "&thermo_on=";
 					else return;	// Something funny happened
 					++byte_pos;
 
 					// Convert the data
-					byte[] fdata = { packet[byte_pos+0], packet[byte_pos+1], packet[byte_pos+2], packet[byte_pos+3] };
-					float fvalue = byteToFloat(fdata);
+					byte[] fdata = { packetData[byte_pos+0], packetData[byte_pos+1], packetData[byte_pos+2], packetData[byte_pos+3] };
+					float fvalue = Converters.byteToFloat(fdata);
 					if(isPressure) {
 						// Convert station pressure to altimiter pressure
 						double Pmb = 0.01*fvalue;
@@ -260,8 +271,8 @@ namespace InternetControllerTest {
 			// Cast the request args
 			ProgramOverrideArgs txCmd = (request is ProgramOverrideArgs) ? request as ProgramOverrideArgs : null;
 
-			// Create the command packet
-			byte[] tempArray = floatToByte((float) txCmd.Temperature);
+			// Create the xbee command packet
+			byte[] tempArray = Converters.floatToByte((float) txCmd.Temperature);
 			byte[] cmd = { CMD_OVERRIDE, txCmd.TurnOn ? STATUS_ON : STATUS_OFF, tempArray[0], tempArray[1], tempArray[2], tempArray[3] };
 
 			// Create the command
@@ -277,7 +288,27 @@ namespace InternetControllerTest {
 		}
 
 		static void server_thermoRuleChanged(Socket client, RequestArgs request) {
-			throw new NotImplementedException();
+			// Cast the request args
+			RuleChangeArgs txCmd = (request is RuleChangeArgs) ? request as RuleChangeArgs : null;
+
+			// Create the xbee command packet
+			byte[] cmd = null;
+			switch(txCmd.ChangeRequested) {
+				case RuleChangeArgs.Operation.Get:
+					cmd = new byte[] { CMD_RULE_CHANGE, STATUS_GET };
+					break;
+			}
+
+			// Create the command
+			XBeeAddress64 controller = new XBeeAddress64("00 13 A2 00 40 AE B9 7F");
+			TxRequest txTransmission = new TxRequest(controller, cmd);
+
+			// Create the command, and check that it was received
+			XBeeResponse response = xBee.Send(txTransmission).GetResponse();
+			Debug.Assert(response is TxStatusResponse);	// For debugging
+			TxStatusResponse txResponse = response as TxStatusResponse;
+			if(!txResponse.IsSuccess) Debug.Print("Error sending thermostat rule command: " + txResponse.ToString());	// TODO - DEVELOP ERROR HANDLING CODE
+			else Debug.Print("Successfully sent thermostat rule command");
 		}
 
 		static void server_dataRequested(Socket client, RequestArgs request) {
