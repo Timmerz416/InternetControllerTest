@@ -259,12 +259,23 @@ namespace InternetControllerTest {
 			byte[] cmd = { CMD_THERMO_POWER, txCmd.TurnOn ? STATUS_ON : STATUS_OFF };
 			TxRequest txTransmission = new TxRequest(controller, cmd);
 
-			// Create the command, and check that it was received
-			XBeeResponse response = xBee.Send(txTransmission).GetResponse();
-			Debug.Assert(response is TxStatusResponse);	// For debugging
-			TxStatusResponse txResponse = response as TxStatusResponse;
-			if(!txResponse.IsSuccess) Debug.Print("Error sending thermostat status command: " + txResponse.ToString());	// TODO - DEVELOP ERROR HANDLING CODE
-			else Debug.Print("Successfully sent thermostat status command");
+            // Enter the loop to send the command
+            bool cmdSent = false;   // Tracks the status of the command
+            while (!cmdSent) {
+				try {
+					// Send the command, and check that it was received
+					XBeeResponse response = xBee.Send(txTransmission).GetResponse();
+					Debug.Assert(response is TxStatusResponse);	// For debugging
+					TxStatusResponse txResponse = response as TxStatusResponse;
+					if(!txResponse.IsSuccess) Debug.Print("Error sending thermostat status command: " + txResponse.ToString());	// TODO - DEVELOP ERROR HANDLING CODE
+					else Debug.Print("Successfully sent thermostat status command");
+
+					cmdSent = true;
+				} catch(XBeeTimeoutException) {
+					Debug.Print("Timeout sending message, will try again");
+					Thread.Sleep(100);
+				}
+            }
 		}
 
 		static void server_programOverride(Socket client, RequestArgs request) {
@@ -279,12 +290,21 @@ namespace InternetControllerTest {
 			XBeeAddress64 controller = new XBeeAddress64("00 13 A2 00 40 AE B9 7F");
 			TxRequest txTransmission = new TxRequest(controller, cmd);
 
-			// Create the command, and check that it was received
-			XBeeResponse response = xBee.Send(txTransmission).GetResponse();
-			Debug.Assert(response is TxStatusResponse);	// For debugging
-			TxStatusResponse txResponse = response as TxStatusResponse;
-			if(!txResponse.IsSuccess) Debug.Print("Error sending program override command: " + txResponse.ToString());	// TODO - DEVELOP ERROR HANDLING CODE
-			else Debug.Print("Successfully sent program override command");
+			// Enter the loop to send the command
+			bool cmdSent = false;
+			while(!cmdSent) {
+				try {
+					// Create the command, and check that it was received
+					XBeeResponse response = xBee.Send(txTransmission).GetResponse();
+					Debug.Assert(response is TxStatusResponse);	// For debugging
+					TxStatusResponse txResponse = response as TxStatusResponse;
+					if(!txResponse.IsSuccess) Debug.Print("Error sending program override command: " + txResponse.ToString());	// TODO - DEVELOP ERROR HANDLING CODE
+					else Debug.Print("Successfully sent program override command");
+				} catch(XBeeTimeoutException) {
+					Debug.Print("Timeout sending message, will try again");
+					Thread.Sleep(100);
+				}
+			}
 		}
 
 		static void server_thermoRuleChanged(Socket client, RequestArgs request) {
