@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Express 2012 for Windows Desktop
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Internet Controller Test", "Internet Controller Test\Internet Controller Test.csproj", "{1781DA8C-6646-4CBB-8276-84DDB321DC4D}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "XBee", "..\GBee - 96c108e8cf91\source\XBee_42\XBee.csproj", "{7F280F44-4AE1-4917-83BC-36825E729EC2}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "XBee", "..\..\CodePlex\GBee\source\XBee_42\XBee.csproj", "{7F280F44-4AE1-4917-83BC-36825E729EC2}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
