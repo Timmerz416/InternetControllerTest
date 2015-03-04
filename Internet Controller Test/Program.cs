@@ -96,6 +96,13 @@ namespace InternetControllerTest {
 			}
 		}
 
+		//=====================================================================
+		// METHOD TO SEND DATA TO THE DATABASE
+		//=====================================================================
+		/// <summary>
+		/// Send command to the MySQL database
+		/// </summary>
+		/// <param name="sendURL">The html command to add data to the database</param>
 		private static void DBSendData(string sendURL) {
 			// Send data over the ethernet
 			using(Socket client = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp)) {
@@ -156,10 +163,45 @@ namespace InternetControllerTest {
 			}
 		}
 
+		//=====================================================================
+		// ProcessGetRuleResults
+		//=====================================================================
+		/// <summary>
+		/// This method takes the data packet containing a list of thermostat rules and passes it on to the requesting client
+		/// </summary>
+		/// <param name="packetData">The data packet from the XBee transmission</param>
 		private static void ProcessGetRuleResults(byte[] packetData) {
 			// Determine the number of rules
 			byte num_rules = packetData[2];
 			Debug.Print("A total of " + num_rules + " rules sent with a packet length of " + packetData.Length);
+
+			//-----------------------------------------------------------------
+			// Convert the packet into a string with the data
+			//-----------------------------------------------------------------
+			string dataStr = num_rules.ToString();
+			for(int i = 0; i < num_rules; i++) {
+				// Collect the byte arrays for the rule
+				byte[] tempArray = new byte[4];
+				byte[] timeArray = new byte[4];
+				for(int j = 0; j < 4; j++) {
+					timeArray[j] = packetData[9*i + j + 4];
+					tempArray[j] = packetData[9*i + j + 8];
+				}
+
+				// Convert the arrays to floats and add to the string
+				double time = ByteToFloat(timeArray);
+				double temperature = ByteToFloat(tempArray);
+				dataStr += "-" + packetData[9 * i + 3] + ":" + time.ToString("F") + ":" + temperature.ToString("F");
+			}
+
+			//-----------------------------------------------------------------
+			// Send the data string to the requesting client via a socket
+			//-----------------------------------------------------------------
+			using(Socket netSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp)) {
+				try {
+					// Send the data
+					netSocket.Connect(new IPEndPoint(IPAddress.Parse("192.168.2.50"), 6232));
+			}
 		}
 
 		private static void UpdateSensorData(byte[] packetData, XBeeAddress sender) {
@@ -333,6 +375,20 @@ namespace InternetControllerTest {
 
 		static void server_dataRequested(Socket client, RequestArgs request) {
 			throw new NotImplementedException();
+		}
+
+		//=====================================================================
+		// ByteToFloat
+		//=====================================================================
+		/// <summary>
+		/// Converts a 4-byte array to a float
+		/// </summary>
+		/// <param name="byte_array">The 4-byte array of the float</param>
+		/// <returns>The float corresponding to the 4-byte array</returns>
+		private static unsafe float ByteToFloat(byte[] byte_array) {
+			uint ret = (uint)(byte_array[0] << 0 | byte_array[1] << 8 | byte_array[2] << 16 | byte_array[3] << 24);
+			float r = *((float*)&ret);
+			return r;
 		}
 	}
 

@@ -16,6 +16,7 @@ namespace InternetControllerTest {
 		// Members
 		readonly int portNumber;
 		private Socket listeningSocket = null;
+		private IPEndPoint _client;
 
 		// Events
 		public event RequestReceivedHandler thermoStatusChanged;
@@ -40,14 +41,19 @@ namespace InternetControllerTest {
 			Dispose();
 		}
 
+		// Parmeters
+		public IPEndPoint ClientIP {
+			get { return _client; }
+		}
+
 		// Listening thread
 		public void StartListening() {
 			// Infinite loop looking for connections
 			while(true) {
 				using(Socket clientSocket = listeningSocket.Accept()) {
 					// Get the client IP
-					IPEndPoint clientIP = clientSocket.RemoteEndPoint as IPEndPoint;
-					Debug.Print("Received request from " + clientIP.ToString());
+					_client = clientSocket.RemoteEndPoint as IPEndPoint;
+					Debug.Print("Received request from " + _client.ToString());
 
 					// Determine the size of the transmission
 					int availableBytes = clientSocket.Available;
