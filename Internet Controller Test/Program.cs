@@ -9,6 +9,7 @@ using SecretLabs.NETMF.Hardware.Netduino;
 using NETMF.OpenSource.XBee;
 using NETMF.OpenSource.XBee.Api;
 using NETMF.OpenSource.XBee.Api.Zigbee;
+using Toolbox.NETMF;
 
 namespace InternetControllerTest {
 
@@ -201,6 +202,15 @@ namespace InternetControllerTest {
 				try {
 					// Send the data
 					netSocket.Connect(new IPEndPoint(IPAddress.Parse("192.168.2.50"), 6232));
+					using(NetworkStream outStream = new NetworkStream(netSocket)) {
+						// Convert the string to a byte array
+						byte[] buffer = Toolbox.NETMF.Tools.Chars2Bytes(dataStr.ToCharArray());
+						outStream.Write(buffer, 0, buffer.Length);
+					}
+					Debug.Print("Sent message: " + dataStr);
+				} catch(Exception e) {
+					Debug.Print("Received exception in ProcessGetRulesResult: " + e.Message);
+				}
 			}
 		}
 
