@@ -201,7 +201,7 @@ namespace InternetControllerTest {
 			using(Socket netSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp)) {
 				try {
 					// Send the data
-					netSocket.Connect(new IPEndPoint(IPAddress.Parse("192.168.2.50"), 6232));
+					netSocket.Connect(new IPEndPoint(IPAddress.Parse("192.168.2.20"), 6232));
 					using(NetworkStream outStream = new NetworkStream(netSocket)) {
 						// Convert the string to a byte array
 						byte[] buffer = Toolbox.NETMF.Tools.Chars2Bytes(dataStr.ToCharArray());
