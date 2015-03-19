@@ -6,66 +6,50 @@ using System.Net;
 using System.IO;
 
 namespace InternetControllerTest {
-/*	/// <summary>
-	/// Holds information about a web request
+
+	//=========================================================================
+	// RequestArgs Class
+	//=========================================================================
+	/// <summary>
+	/// Base class for handling socket commands
 	/// </summary>
-	/// <remarks>
-	/// Will expand as required, but stay simple until needed.
-	/// </remarks>
-	public class Request : IDisposable {
-		private Socket _client;
-		protected string _data;
-
-		internal Request(Socket Client, char[] Data) {
-			_client = Client;
-			_data = new string(Data);
-		}
-
-		/// <summary>
-		/// Client IP address
-		/// </summary>
-		public IPAddress Client {
-			get {
-				IPEndPoint ip = _client.RemoteEndPoint as IPEndPoint;
-				if(ip != null) return ip.Address;
-				return null;
-			}
-		}
-
-		/// <summary>
-		/// Send a response back to the client
-		/// </summary>
-		/// <param name="response"></param>
-		public void SendResponse(string response) {
-			throw new NotImplementedException("SendResponse not implemented in Response class.");
-		}
-
-		#region IDisposable Members
-
-		public void Dispose() {
-			if(_client != null) {
-				_client.Close();
-				_client = null;
-			}
-		}
-
-		#endregion
-	}*/
-
 	public class RequestArgs {
-		protected string _command;
-		protected string[] _args;
+		// Private members
+		protected string _command;	// Contains the received message from the socket
+		protected string[] _args;	// Parsed arguments for the command
 
+		//=====================================================================
+		// Constructor
+		//=====================================================================
+		/// <summary>
+		/// Constructor to initialize members
+		/// </summary>
+		/// <param name="Data">The message sent over the network</param>
 		public RequestArgs(char[] Data) {
 			_command = new string(Data);
 			_args = _command.Split(':');
 		}
 	}
 
-	public class ThermStatusArgs : RequestArgs {
-		private bool _turnOn;
+	//=========================================================================
+	// ThermoStatusArgs Class
+	//=========================================================================
+	/// <summary>
+	/// Class for tracking a command to turn on/off the thermostat
+	/// </summary>
+	public class ThermoStatusArgs : RequestArgs {
+		// Private members
+		private bool _turnOn;	// Indicates if the command was to turn on the thermostat
 
-		public ThermStatusArgs(char[] Data) : base(Data) {
+		//=====================================================================
+		// Constructor
+		//=====================================================================
+		/// <summary>
+		/// Constructor to initialize members
+		/// </summary>
+		/// <param name="Data">The message sent over the network</param>
+		public ThermoStatusArgs(char[] Data)
+			: base(Data) {
 			// Check that there are two args
 			if(_args.Length != 2) throw new ArgumentException("Thermostat Command requires 2 arguments");
 
@@ -75,6 +59,13 @@ namespace InternetControllerTest {
 			else throw new ArgumentException("Thermostat Status Command '" + _command + "' Not Currently Handled.");
 		}
 
+		//=====================================================================
+		// Parameters
+		//=====================================================================
+		// TurnOn
+		/// <summary>
+		/// Indicates if the command was to turn on (true) or off (false) the thermostat
+		/// </summary>
 		public bool TurnOn {
 			get { return _turnOn; }
 		}
@@ -193,8 +184,8 @@ namespace InternetControllerTest {
 
 			// Set the values
 			_days = (DayType) packetData[0];
-			_time = Converters.byteToFloat(time);
-			_temp = Converters.byteToFloat(temp);
+			_time = Converters.ByteToFloat(time);
+			_temp = Converters.ByteToFloat(temp);
 		}
 
 		public byte[] toByteArray() {
@@ -202,8 +193,8 @@ namespace InternetControllerTest {
 
 			// Get the byte bits
 			byte day = (byte) _days;
-			byte[] time = Converters.floatToByte(_time);
-			byte[] temp = Converters.floatToByte(_temp);
+			byte[] time = Converters.FloatToByte(_time);
+			byte[] temp = Converters.FloatToByte(_temp);
 
 			// Create the packet
 			byte[] packet = new byte[PACKET_LENGTH];

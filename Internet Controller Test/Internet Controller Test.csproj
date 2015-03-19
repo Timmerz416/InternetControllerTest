@@ -35,9 +35,10 @@
   <Import Project="$(NetMfTargetsBaseDir)$(TargetFrameworkVersion)\CSharp.Targets" />
   <ItemGroup>
     <Compile Include="Converters.cs" />
+    <Compile Include="IOSamples.cs" />
     <Compile Include="WebServer\Listener.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="Program.cs" />
+    <Compile Include="INetControlTest.cs" />
     <Compile Include="WebServer\Requests.cs" />
   </ItemGroup>
   <ItemGroup>

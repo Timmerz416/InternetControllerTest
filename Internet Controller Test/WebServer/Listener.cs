@@ -9,13 +9,13 @@ namespace InternetControllerTest {
 
 	public delegate void RequestReceivedHandler(Socket client, RequestArgs request);
 
-	public class Listener : IDisposable {
+	public class SocketListener : IDisposable {
 		// Local constants
-		const int maxRequestSize = 1024;
+		const int MAX_REQUEST_SIZE = 1024;
 
 		// Members
-		readonly int portNumber;
-		private Socket listeningSocket = null;
+		readonly int _portNumber;
+		private Socket _listeningSocket = null;
 		private IPEndPoint _client;
 
 		// Events
@@ -25,19 +25,19 @@ namespace InternetControllerTest {
 		public event RequestReceivedHandler dataRequested;
 
 		// Constructor
-		public Listener(int PortNumber) {
+		public SocketListener(int PortNumber) {
 			// Setup the socket and initialize it for listening
-			portNumber = PortNumber;
-			listeningSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-			listeningSocket.Bind(new IPEndPoint(IPAddress.Any, portNumber));
-			listeningSocket.Listen(10);
+			_portNumber = PortNumber;
+			_listeningSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+			_listeningSocket.Bind(new IPEndPoint(IPAddress.Any, _portNumber));
+			_listeningSocket.Listen(10);
 
 			// Listen for connections in another thread
 			new Thread(StartListening).Start();
 		}
 
 		// Destructor
-		~Listener() {
+		~SocketListener() {
 			Dispose();
 		}
 
@@ -50,14 +50,14 @@ namespace InternetControllerTest {
 		public void StartListening() {
 			// Infinite loop looking for connections
 			while(true) {
-				using(Socket clientSocket = listeningSocket.Accept()) {
+				using(Socket clientSocket = _listeningSocket.Accept()) {
 					// Get the client IP
 					_client = clientSocket.RemoteEndPoint as IPEndPoint;
 					Debug.Print("Received request from " + _client.ToString());
 
 					// Determine the size of the transmission
 					int availableBytes = clientSocket.Available;
-					int bytesReceived = (availableBytes > maxRequestSize ? maxRequestSize : availableBytes);
+					int bytesReceived = (availableBytes > MAX_REQUEST_SIZE ? MAX_REQUEST_SIZE : availableBytes);
 					Debug.Print(DateTime.Now.ToString() + " " + availableBytes.ToString() + " request bytes available; " + bytesReceived + " bytes to try and receive.");
 
 					// Process the request
@@ -70,7 +70,7 @@ namespace InternetControllerTest {
 						string code = new string(Encoding.UTF8.GetChars(buffer, 0, 2));
 						char[] cmd = Encoding.UTF8.GetChars(buffer);
 						if(code == "TS") {	// Thermo status command
-							if(thermoStatusChanged != null) thermoStatusChanged(clientSocket, new ThermStatusArgs(cmd));
+							if(thermoStatusChanged != null) thermoStatusChanged(clientSocket, new ThermoStatusArgs(cmd));
 						} else if(code == "PO") {	// Program override command
 							if(programOverrideRequested != null) programOverrideRequested(clientSocket, new ProgramOverrideArgs(cmd));
 						} else if(code == "TR") {	// Thermo rule command
@@ -89,8 +89,7 @@ namespace InternetControllerTest {
 		/// Closes the listening socket
 		/// </summary>
 		public void Dispose() {
-			if(listeningSocket != null) listeningSocket.Close();
-
+			if(_listeningSocket != null) _listeningSocket.Close();
 		}
 		#endregion
 	}
