@@ -233,29 +233,27 @@ namespace InternetControllerTest {
 			//-----------------------------------------------------------------
 			// Create the transmission object to the specified destination
 			TxRequest request = new TxRequest(destination, payload);
+			request.Option = TxRequest.Options.DisableAck;
 
 			// Create debug console message
-			string message = "Sent XBee response to " + destination.ToString() + " (";
+			string message = "Sending XBee message to " + destination.ToString() + " (";
 			for(int i = 0; i < payload.Length; i++) message += payload[i].ToString("X") + (i == (payload.Length - 1) ? "" : "-");
 			message += ") => ";
 
 			// Connect to the XBee
-			bool responseACK = false;
+			bool sentMessage = false;
 			if(ConnectToXBee()) {
 				try {
-					XBeeResponse reply = xBee.Send(request).GetResponse();	// Send packet
-					if(reply is TxStatusResponse) {
-						TxStatusResponse txStatus = reply as TxStatusResponse;
-						responseACK = txStatus.IsSuccess;
-						message += responseACK ? "Sent" : "Not Received";
-					}
+					xBee.Send(request).NoResponse();	// Send packet
+					sentMessage = true;
+					message += "Sent";
 				} catch(XBeeTimeoutException) {
-					message += "Timeout sending message";
+					message += "Timeout";
 				}	// OTHER EXCEPTION TYPE TO INCLUDE?
-			}
+			} else message += "XBee disconnected";
 
 			Debug.Print(message);
-			return responseACK;
+			return sentMessage;
 		}
 
 		//=====================================================================
@@ -315,16 +313,18 @@ namespace InternetControllerTest {
 			byte[] packet = FormatApiMode(data, true);
 
 			// Print the received request to the debug console
-			string message = "Received XBee request from " + sender.ToString() + ": ";
+			string message = "Received XBee message from " + sender.ToString() + ": ";
 			for(int i = 0; i < packet.Length; i++) message += packet[i].ToString("X") + (i == (packet.Length - 1) ? "" : "-");
 			Debug.Print(message);
 
 			// Check the current status of communications
 			if(packet[0] == CMD_SENSOR_DATA) {
 				//-------------------------------------------------------------
-				// Process the sensor data
+				// Process the sensor data and send acknowledgement
 				//-------------------------------------------------------------
 				UpdateSensorData(packet, sender);
+				byte[] response = { CMD_SENSOR_DATA, CMD_ACK };
+				SendXBeeTransmission(response, sender);
 			}
 			else if(awaitingResponse) {
 				//-------------------------------------------------------------
