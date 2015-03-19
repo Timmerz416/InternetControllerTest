@@ -1,0 +1,646 @@
+﻿using System;
+using System.Net;
+using System.Net.Sockets;
+using System.Threading;
+using Microsoft.SPOT;
+using Microsoft.SPOT.Hardware;
+using SecretLabs.NETMF.Hardware;
+using SecretLabs.NETMF.Hardware.Netduino;
+using NETMF.OpenSource.XBee;
+using NETMF.OpenSource.XBee.Api;
+using NETMF.OpenSource.XBee.Api.Zigbee;
+using Toolbox.NETMF;
+using System.Collections;
+
+namespace InternetControllerTest {
+
+	public class Program {
+		//=====================================================================
+		// PORT SETUP
+		//=====================================================================
+		// Digital Ports
+		private static OutputPort onboardLED = new OutputPort(Pins.ONBOARD_LED, false);		// Turn off the onboard led
+		private static OutputPort controlLED = new OutputPort(Pins.GPIO_PIN_D7, false);		// Initially this is off
+
+		// Analog Ports
+		private static AnalogInput tmp36 = new AnalogInput(AnalogChannels.ANALOG_PIN_A0);	// Analog pin to read temperature
+
+		//=====================================================================
+		// SOCKET COMMUNICATION SETUP
+		//=====================================================================
+		// Addresses
+		private const string DB_ADDRESS = "192.168.2.53";	// The address to the server with the MySQL server
+		private const int DB_PORT = 80;						// The port to send the webserver request to
+		private const int LISTENING_PORT = 5267;			// The port that the microcontroller will listen for commands
+
+		//=====================================================================
+		// XBEE SETUP
+		//=====================================================================
+		// XBee sensor codes
+		private enum XBeePortData { Temperature, Luminosity, Pressure, Humidity, LuminosityLux, HeatingOn, ThermoOn, Power }
+
+		// XBee command codes
+		const byte CMD_THERMO_POWER = 1;
+		const byte CMD_OVERRIDE		= 2;
+		const byte CMD_RULE_CHANGE	= 3;
+		const byte CMD_SENSOR_DATA	= 4;
+
+		// XBee subcommand codes
+		const byte CMD_NACK			= 0;
+		const byte CMD_ACK			= 1;
+		const byte STATUS_OFF		= 2;
+		const byte STATUS_ON		= 3;
+		const byte STATUS_GET		= 4;
+		const byte STATUS_ADD		= 5;
+		const byte STATUS_DELETE	= 6;
+		const byte STATUS_MOVE		= 7;
+		const byte STATUS_UPDATE	= 8;
+
+		// XBee connection members
+		private static XBeeApi xBee;				// The object controlling the XBee interface
+		private static bool xbeeConnected = false;	// A flat to indicate the status of the xbee connection (true = connected)
+
+		//=====================================================================
+		// NETWORKING MEMBERS/CONSTANTS
+		//=====================================================================
+		// Addresses
+		private const string RELAY_ADDRESS = "00 13 A2 00 40 AE B9 7F";	// The address of the xbee radio
+		private const string CONTROL_ADDRESS = "40aeba93";	// The short address of this controller radio (attached to this netduino plus) for DB identification
+		private const string XBEE_PORT = "COM1";
+
+		// Messaging
+		private static bool awaitingResponse = false;	// Indicates whether the response from the relay has been received
+		private static byte lastXBeeCommand = CMD_NACK;	// Tracks the last message sent for checking responses
+		private static IPAddress requestIP = null;		// Tracks the network location where the request originated
+		private static int requestPort = 0;				// Tracks the port the request was sent from
+
+		//=====================================================================
+		// MAIN PROGRAM
+		//=====================================================================
+		public static void Main() {
+			//-----------------------------------------------------------------
+			// Initialize the socket communications
+			//-----------------------------------------------------------------
+			// Start the socked listening thread
+			SocketListener network = new SocketListener(LISTENING_PORT);
+
+			// Setup event handling
+			network.thermoStatusChanged += network_thermoStatusChanged;
+			network.programOverrideRequested += network_programOverride;
+			network.thermoRuleChanged += network_thermoRuleChanged;
+			network.dataRequested += network_dataRequested;
+
+			//-----------------------------------------------------------------
+			// Initialize the XBee communications
+			//-----------------------------------------------------------------
+			// Setup the xBee
+			Debug.Print("Initializing XBee...");
+			xBee = new XBeeApi(XBEE_PORT, 9600);
+			xBee.EnableDataReceivedEvent();
+			xBee.EnableAddressLookup();
+			xBee.EnableModemStatusEvent();
+			NETMF.OpenSource.XBee.Util.Logger.Initialize(Debug.Print, NETMF.OpenSource.XBee.Util.LogLevel.All);
+
+			// Connect to the XBee
+			ConnectToXBee();
+
+			// Create the Zigbee IO Sample Listener for automated data packets
+			ZigbeeIOSensorListener sensorListener = new ZigbeeIOSensorListener();	// Create listnener
+			sensorListener.SensorDataReceived += sensorListener_DataReceived;		// Add event handling
+			xBee.AddPacketListener(sensorListener);									// Connect listener
+
+			// Add event handling for custom-built packets transmitted over Zigbee
+			xBee.DataReceived += xBee_PacketReceived;
+
+			//-----------------------------------------------------------------
+			// Infinite loop to collect local sensor data
+			//-----------------------------------------------------------------
+			while(true) {
+				// Get the sensor reading - perform an average over 20 readings
+				double tempSum = 0.0;
+				for(int i = 0; i < 20; i++) {
+					// Get the air reading
+					double voltage = 3.3*tmp36.Read();
+					tempSum += 100.0*voltage - 50.0;
+					Thread.Sleep(100);	// Sleep for 0.1 s before taking another sample
+				}
+				double temperature = tempSum/20.0;
+
+				// Update the database - Air temperature
+				string sensorUpdate = "GET /db_test_upload.php?radio_id=" + CONTROL_ADDRESS + "&temperature=" + temperature.ToString("F2") + "&power=3.3\r\n";
+				SendNetworkRequest(sensorUpdate, IPAddress.Parse(DB_ADDRESS), DB_PORT);
+
+				// Sleep on this thread for the rest of the ~2 minutes
+				Thread.Sleep(118000);
+			}
+		}
+
+		//=====================================================================
+		// ConnectToXBee
+		//=====================================================================
+		/// <summary>
+		/// The method to connect to the XBee trhough the API
+		/// </summary>
+		/// <returns>Whether the connection was successful</returns>
+		private static bool ConnectToXBee() {
+			//-----------------------------------------------------------------
+			// Only connect if not already connected
+			//-----------------------------------------------------------------
+			if(!xbeeConnected) {
+				try {
+					// Connect to the XBee
+					xBee.Open();
+					xbeeConnected = true;	// Set connection status
+					Debug.Print("XBee Connected...");
+				} catch(Exception xbeeIssue) {	// Assumes the only exceptions are related to connecting to xbee
+					Debug.Print("Caught the following trying to open the XBee connection: " + xbeeIssue.Message);
+					return false;
+				}
+			}
+
+			// If the code get here, the xbee is connected
+			return true;
+		}
+
+		//=====================================================================
+		// SendNetworkRequest - By address and port
+		//=====================================================================
+		/// <summary>
+		/// Sends a html request to the webserver
+		/// </summary>
+		/// <param name="message">The request to send</param>
+		/// <param name="address">The address to send to</param>
+		/// <param name="port">The port to address</param>
+		/// <returns>If the send was successful or not</returns>
+		private static bool SendNetworkRequest(string message, IPAddress address, int port) {
+			// Send request of the network
+/*			using(Socket client = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp)) {
+				try {
+					client.Connect(new IPEndPoint(address, port));	// Connect to endpoint
+					using(NetworkStream netStream = new NetworkStream(client)) {
+						byte[] buffer = System.Text.Encoding.UTF8.GetBytes(message);
+						netStream.Write(buffer, 0, buffer.Length);
+					}
+				} catch(Exception issue) {	// This code assumes any exception results in incomplete transmission
+					Debug.Print("Follow message returned when trying to send request: " + issue.Message);
+					return false;
+				}
+			}*/
+
+			// Print string to debug console
+			Debug.Print("The following message was sent to " + address.ToString() + ":" + port.ToString() + " => " + message);
+			return true;	// All assumed ok if at this point
+		}
+
+		//=====================================================================
+		// SendNetworkRequest - By socket
+		//=====================================================================
+		/// <summary>
+		/// Sends a html request to the webserver
+		/// </summary>
+		/// <param name="message">The request to send</param>
+		/// <param name="endpoint">The socket to send the request through</param>
+		/// <returns>If the send was successful or not</returns>
+		private static bool SendNetworkRequest(string message, Socket endpoint) {
+			// Send request through the provided socket
+			try {
+				using(NetworkStream netStream = new NetworkStream(endpoint)) {
+					byte[] buffer = System.Text.Encoding.UTF8.GetBytes(message);
+					netStream.Write(buffer, 0, buffer.Length);
+				}
+			} catch(Exception issue) {
+				Debug.Print("Follow message returned when trying to send request: " + issue.Message);
+				return false;
+			}
+
+			// Print the string to the debug console
+			Debug.Print("Sent the following message to " + endpoint.RemoteEndPoint.ToString() + ": " + message);
+			return true;	// All assumed ok if at this point
+		}
+
+		//=====================================================================
+		// SendXBeeTransmission
+		//=====================================================================
+		/// <summary>
+		/// Sends a TxRequest over the XBee network
+		/// </summary>
+		/// <param name="payload">The data payload for the transmission</param>
+		/// <param name="destination">The XBee radio to send the data to</param>
+		/// <returns>If the transmission was successful</returns>
+		private static bool SendXBeeTransmission(byte[] payload, XBeeAddress destination) {
+			//-----------------------------------------------------------------
+			// Send the packet to the destination
+			//-----------------------------------------------------------------
+			// Create the transmission object to the specified destination
+			TxRequest request = new TxRequest(destination, payload);
+
+			// Create debug console message
+			string message = "Sent XBee response to " + destination.ToString() + " (";
+			for(int i = 0; i < payload.Length; i++) message += payload[i].ToString("X") + (i == (payload.Length - 1) ? "" : "-");
+			message += ") => ";
+
+			// Connect to the XBee
+			bool responseACK = false;
+			if(ConnectToXBee()) {
+				try {
+					XBeeResponse reply = xBee.Send(request).GetResponse();	// Send packet
+					if(reply is TxStatusResponse) {
+						TxStatusResponse txStatus = reply as TxStatusResponse;
+						responseACK = txStatus.IsSuccess;
+						message += responseACK ? "Sent" : "Not Received";
+					}
+				} catch(XBeeTimeoutException) {
+					message += "Timeout sending message";
+				}	// OTHER EXCEPTION TYPE TO INCLUDE?
+			}
+
+			Debug.Print(message);
+			return responseACK;
+		}
+
+		//=====================================================================
+		// network_thermoStatusChanged
+		//=====================================================================
+		/// <summary>
+		/// Event handler when receiving a network command to set thermostat status
+		/// </summary>
+		/// <param name="client">The network source of the request</param>
+		/// <param name="request">The request that was made</param>
+		static void network_thermoStatusChanged(Socket client, RequestArgs request) {
+			// Cast the request args
+			ThermoStatusArgs txCmd = (request is ThermoStatusArgs) ? request as ThermoStatusArgs : null;
+			if(txCmd != null) {
+				// Set the LED accordingly - DEBUGGING
+				controlLED.Write(txCmd.TurnOn);
+
+				//-------------------------------------------------------------
+				// Send the message
+				//-------------------------------------------------------------
+				// Create the payload
+				byte[] payload = { CMD_THERMO_POWER, txCmd.TurnOn ? STATUS_ON : STATUS_OFF };
+
+				// Send the command
+				if(SendXBeeTransmission(payload, new XBeeAddress64(RELAY_ADDRESS))) {
+					// Update the messaging status
+					awaitingResponse = true;
+					lastXBeeCommand = CMD_THERMO_POWER;
+
+					// Get the address and port
+					IPEndPoint remoteIP = client.RemoteEndPoint as IPEndPoint;
+					requestIP = remoteIP.Address;
+					requestPort = remoteIP.Port;
+
+					return;	// All went well, so return and pick up the response through the event handler
+				} // TODO - ERROR HANDLING IF THE REQUEST WAS NOT SENT
+			} Debug.Print("Incompatible RequestArgs sent to thermoStatusChanged: " + request.GetType().ToString());
+
+			//-----------------------------------------------------------------
+			// Send response to the network that the command failed
+			//-----------------------------------------------------------------
+			string response = "TS:NACK";
+			SendNetworkRequest(response, client);
+		}
+
+		//=====================================================================
+		// xBee_PacketReceived
+		//=====================================================================
+		/// <summary>
+		/// This method responds to an XBee packet and takes appropriate actions
+		/// </summary>
+		/// <param name="receiver">The XBee API instance receiving the packet</param>
+		/// <param name="data">The data packet</param>
+		/// <param name="sender">The XBee radio sending the data</param>
+		static void xBee_PacketReceived(XBeeApi receiver, byte[] data, XBeeAddress sender) {
+			// Format the data packet to remove 0x7d instances (assuming API mode is 2)
+			byte[] packet = FormatApiMode(data, true);
+
+			// Print the received request to the debug console
+			string message = "Received XBee request from " + sender.ToString() + ": ";
+			for(int i = 0; i < packet.Length; i++) message += packet[i].ToString("X") + (i == (packet.Length - 1) ? "" : "-");
+			Debug.Print(message);
+
+			// Check the current status of communications
+			if(packet[0] == CMD_SENSOR_DATA) {
+				//-------------------------------------------------------------
+				// Process the sensor data
+				//-------------------------------------------------------------
+				UpdateSensorData(packet, sender);
+			}
+			else if(awaitingResponse) {
+				//-------------------------------------------------------------
+				// Send a response to the network based on the request
+				//-------------------------------------------------------------
+				// Make sure the response type matches the request
+				if(packet[0] == lastXBeeCommand) {
+					// Create response string
+					string response = "";
+
+					// Check the packet type
+					if(packet[0] == CMD_THERMO_POWER) response = "TS:" + (packet[1] == CMD_ACK ? "ACK" : "NACK");
+					else if(packet[0] == CMD_OVERRIDE) response = "PO:" + (packet[1] == CMD_ACK ? "ACK" : "NACK");
+					else if(packet[0] == CMD_RULE_CHANGE) {
+						// Create the response based on the rule command
+						if(packet[1] == STATUS_GET) response = ProcessGetRuleResults(packet);
+						else {	// Identify error
+							Debug.Print("This rule request type has not been implemented yet.");
+							response = "TR:NACK";
+						}
+					}
+
+					// Send the response
+					SendNetworkRequest(response, requestIP, requestPort);
+
+					// Reset the messaging tracking
+					awaitingResponse = false;
+					lastXBeeCommand = CMD_NACK;
+					requestIP = null;
+					requestPort = 0;
+				} 
+			} else {
+				//-------------------------------------------------------------
+				// Handle unexpected packet
+				//-------------------------------------------------------------
+				Debug.Print("Don't know how we got here?");
+			}
+		}
+
+		//=====================================================================
+		// ProcessGetRuleResults
+		//=====================================================================
+		/// <summary>
+		/// This method takes the data packet containing a list of thermostat rules and passes it on to the requesting client
+		/// </summary>
+		/// <param name="packetData">The data packet from the XBee transmission</param>
+		/// <returns>The message to send out to the network</returns>
+		private static string ProcessGetRuleResults(byte[] packetData) {
+			// Determine the number of rules
+			byte num_rules = packetData[2];
+			Debug.Print("A total of " + num_rules + " rules sent with a packet length of " + packetData.Length);
+
+			//-----------------------------------------------------------------
+			// Convert the packet into a string with the data
+			//-----------------------------------------------------------------
+			string dataStr = num_rules.ToString();
+			for(int i = 0; i < num_rules; i++) {
+				// Collect the byte arrays for the rule
+				byte[] tempArray = new byte[4];
+				byte[] timeArray = new byte[4];
+				for(int j = 0; j < 4; j++) {
+					timeArray[j] = packetData[9*i + j + 4];
+					tempArray[j] = packetData[9*i + j + 8];
+				}
+
+				// Convert the arrays to floats and add to the string
+				double time = Converters.ByteToFloat(timeArray);
+				double temperature = Converters.ByteToFloat(tempArray);
+				dataStr += "-" + packetData[9 * i + 3] + ":" + time.ToString("F") + ":" + temperature.ToString("F");
+			}
+
+			//-----------------------------------------------------------------
+			// Send the data string to the requesting client via a socket
+			//-----------------------------------------------------------------
+			using(Socket netSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp)) {
+				try {
+					// Send the data
+					netSocket.Connect(new IPEndPoint(IPAddress.Parse("192.168.2.20"), 6232));
+					using(NetworkStream outStream = new NetworkStream(netSocket)) {
+						// Convert the string to a byte array
+						byte[] buffer = Toolbox.NETMF.Tools.Chars2Bytes(dataStr.ToCharArray());
+						outStream.Write(buffer, 0, buffer.Length);
+					}
+					Debug.Print("Sent message: " + dataStr);
+				} catch(Exception e) {
+					Debug.Print("Received exception in ProcessGetRulesResult: " + e.Message);
+				}
+			}
+
+			return "";
+		}
+
+		//=====================================================================
+		// UpdateSensorData
+		//=====================================================================
+		/// <summary>
+		/// Converts a custom sensor data packet into a format for uploading to
+		/// the database and dispatches this update over the network.
+		/// </summary>
+		/// <param name="packetData">The received sensor data payload</param>
+		/// <param name="sender">The XBee sending the data</param>
+		private static void UpdateSensorData(byte[] packetData, XBeeAddress sender) {
+			// Create the http request string
+			string dataUpdate = "GET /db_test_upload.php?radio_id=";
+
+			// Get the sensor
+			for(int i = 4; i < sender.Address.Length; i++) dataUpdate += sender.Address[i].ToString("x").ToLower();
+
+			// Iterate through the data
+//			int data_length = packet.Length - 18;	// This is needed if the routers on in AT mode - they send the whole packet
+			int data_length = packetData.Length - 1;		// This is needed if the routers are in API mode - they send only the data packet
+			if(data_length % 5 != 0) return;	// Something funny happened
+			else {
+				int num_sensors = data_length/5;
+//				int byte_pos = 17;	// The starting point in the data to read the sensor data in AT mode
+				int byte_pos = 1;	// The staarting point in the data to read the sensor data in API mode
+				for(int cur_sensor = 0; cur_sensor < num_sensors; cur_sensor++) {
+					// Determine the type of reading
+					bool isPressure = false;
+					if(packetData[byte_pos] == 0x01) dataUpdate += "&temperature=";
+					else if(packetData[byte_pos] == 0x02) dataUpdate += "&luminosity=";
+					else if(packetData[byte_pos] == 0x04) {
+						dataUpdate += "&pressure=";
+						isPressure = true;
+					} else if(packetData[byte_pos] == 0x08) dataUpdate += "&humidity=";
+					else if(packetData[byte_pos] == 0x10) dataUpdate += "&power=";
+					else if(packetData[byte_pos] == 0x20) dataUpdate += "&luminosity_lux=";
+					else if(packetData[byte_pos] == 0x40) dataUpdate += "&heating_on=";
+					else if(packetData[byte_pos] == 0x80) dataUpdate += "&thermo_on=";
+					else return;	// Something funny happened
+					++byte_pos;
+
+					// Convert the data
+					byte[] fdata = { packetData[byte_pos+0], packetData[byte_pos+1], packetData[byte_pos+2], packetData[byte_pos+3] };
+					float fvalue = Converters.ByteToFloat(fdata);
+					if(isPressure) {
+						// Convert station pressure to altimiter pressure
+						double Pmb = 0.01*fvalue;
+						double hm = 167.64;
+						fvalue = (float) (System.Math.Pow(1 + 8.422881e-5*(hm/System.Math.Pow(Pmb - 0.3, 0.190284)), 1/0.190284)*(Pmb - 0.3));
+					}
+					dataUpdate += fvalue.ToString("F2");
+					byte_pos += 4;
+				}
+
+				// Try sending the data
+				dataUpdate += "\r\n";
+				if(!SendNetworkRequest(dataUpdate, IPAddress.Parse(DB_ADDRESS), DB_PORT)) {	// An error occurred
+					Debug.Print("Could not send the sensor data to the database");
+					// TODO - ADD ERROR HANDLING
+				}
+			}
+		}
+
+		//=====================================================================
+		// sensorListener_DataReceived Event Handler
+		//=====================================================================
+		/// <summary>
+		/// Receives and sensor data packet sent directly from the analog inputs
+		/// on the XBee radio, creates the database command and issues the data
+		/// over the network
+		/// </summary>
+		/// <param name="ioPacket">The IOSamplePacket received by the XBee</param>
+		static void sensorListener_DataReceived(IoSampleResponse ioPacket) {
+			// Print the data
+			Debug.Print(ioPacket.ToString());
+
+			// Create the http request to add the data to the database
+			string dataUpdate = "GET /db_test_upload.php?radio_id=";
+
+			// Get the sensor sending the data
+			dataUpdate += ioPacket.SourceSerial.ToString().Substring(8, 8).ToLower();
+
+			// Temperature reading
+			if(ioPacket.IsAnalogEnabled(IoSampleResponse.Pin.A0)) {
+				double voltage = 1.2*ioPacket.GetAnalog(IoSampleResponse.Pin.A0)/1023.0;
+				double temperature = 100.0*(voltage - 0.5);
+				dataUpdate += "&temperature=" + temperature.ToString("F2");
+			}
+
+			// Luminosity reading
+			if(ioPacket.IsAnalogEnabled(IoSampleResponse.Pin.A1)) {
+				double voltage = 1.2*ioPacket.GetAnalog(IoSampleResponse.Pin.A1)/1023.0;
+				dataUpdate += "&luminosity=" + voltage.ToString("F2");
+			}
+
+			// Power reading
+			if(ioPacket.IsAnalogEnabled(IoSampleResponse.Pin.SupplyVoltage)) {
+				// Until I have a battery pack in the system, this will remain at 3.3V
+				double voltage = 1.2*ioPacket.GetSupplyVoltage()/1023.0;
+				dataUpdate += "&power=" + voltage.ToString("F2");
+			} else dataUpdate += "&power=3.3";
+			dataUpdate += "\r\n";
+
+			// Try sending the data
+			if(!SendNetworkRequest(dataUpdate, IPAddress.Parse(DB_ADDRESS), DB_PORT)) {	// Error occurred
+				Debug.Print("Could not send the sensor data to the database");
+				// TODO - ADD ERROR HANDLING
+			}
+		}
+
+		//=====================================================================
+		// network_programOverride Event Handler
+		//=====================================================================
+		static void network_programOverride(Socket client, RequestArgs request) {
+			// Cast the request args
+			ProgramOverrideArgs txCmd = (request is ProgramOverrideArgs) ? request as ProgramOverrideArgs : null;
+
+			// Create the xbee command packet
+			byte[] tempArray = Converters.FloatToByte((float) txCmd.Temperature);
+			byte[] cmd = { CMD_OVERRIDE, txCmd.TurnOn ? STATUS_ON : STATUS_OFF, tempArray[0], tempArray[1], tempArray[2], tempArray[3] };
+
+			// Create the command
+			XBeeAddress64 controller = new XBeeAddress64("00 13 A2 00 40 AE B9 7F");
+			TxRequest txTransmission = new TxRequest(controller, cmd);
+
+			// Enter the loop to send the command
+			bool cmdSent = false;
+			while(!cmdSent) {
+				try {
+					// Create the command, and check that it was received
+					XBeeResponse response = xBee.Send(txTransmission).GetResponse();
+					Debug.Assert(response is TxStatusResponse);	// For debugging
+					TxStatusResponse txResponse = response as TxStatusResponse;
+					if(!txResponse.IsSuccess) Debug.Print("Error sending program override command: " + txResponse.ToString());	// TODO - DEVELOP ERROR HANDLING CODE
+					else Debug.Print("Successfully sent program override command");
+				} catch(XBeeTimeoutException) {
+					Debug.Print("Timeout sending message, will try again");
+					Thread.Sleep(100);
+				}
+			}
+		}
+
+		//=====================================================================
+		// network_thermoRuleChanged Event Handler
+		//=====================================================================
+		static void network_thermoRuleChanged(Socket client, RequestArgs request) {
+			// Cast the request args
+			RuleChangeArgs txCmd = (request is RuleChangeArgs) ? request as RuleChangeArgs : null;
+
+			// Create the xbee command packet
+			byte[] cmd = null;
+			switch(txCmd.ChangeRequested) {
+				case RuleChangeArgs.Operation.Get:
+					cmd = new byte[] { CMD_RULE_CHANGE, STATUS_GET };
+					break;
+			}
+
+			// Create the command
+			XBeeAddress64 controller = new XBeeAddress64("00 13 A2 00 40 AE B9 7F");
+			TxRequest txTransmission = new TxRequest(controller, cmd);
+
+			// Create the command, and check that it was received
+			XBeeResponse response = xBee.Send(txTransmission).GetResponse();
+			Debug.Assert(response is TxStatusResponse);	// For debugging
+			TxStatusResponse txResponse = response as TxStatusResponse;
+			if(!txResponse.IsSuccess) Debug.Print("Error sending thermostat rule command: " + txResponse.ToString());	// TODO - DEVELOP ERROR HANDLING CODE
+			else Debug.Print("Successfully sent thermostat rule command");
+		}
+
+		//=====================================================================
+		// network_dataRequested Event Handler
+		//=====================================================================
+		static void network_dataRequested(Socket client, RequestArgs request) {
+			throw new NotImplementedException();
+		}
+
+		//=====================================================================
+		// FormatApiMode
+		//=====================================================================
+		/// <summary>
+		/// Formats escape characters in the XBee payload data
+		/// </summary>
+		/// <param name="packet">The payload data</param>
+		/// <param name="filterIncoming">Payload from an incoming tranmission with escape characters</param>
+		/// <returns>The filtered payload data</returns>
+		private static byte[] FormatApiMode(byte[] packet, bool filterIncoming) {
+			// Local variables and constants
+			byte[] escapeChars = { 0x7d, 0x7e, 0x11, 0x13 };	// The bytes requiring escaping
+			const byte filter = 0x20;	// The XOR filter
+			byte[] output;	// Contains the formatted packet
+			int outSize = packet.Length;	// Contains the size of the outgoing packet
+
+			if(filterIncoming) {	// Removed any escaping sequences
+				//-------------------------------------------------------------
+				// REMOVE ESCAPING CHARACTERS FROM PACKET FROM XBEE
+				//-------------------------------------------------------------
+				// Count the outgoing packet size
+				foreach(byte b in packet) if(b == escapeChars[0]) outSize--;
+
+				// Iterate through each byte and adjust
+				output = new byte[outSize];
+				int pos = 0;
+				for(int i = 0; i < packet.Length; i++) {
+					if(packet[i] == escapeChars[0]) output[pos++] = (byte) (packet[++i]^filter);	// Cast needed as XOR works on ints
+					else output[pos++] = packet[i];
+				}
+			} else {
+				//-------------------------------------------------------------
+				// ADD ESCAPING CHARACTERS TO PACKET SENT FROM XBEE
+				//-------------------------------------------------------------
+				// Determine the new size
+				foreach(byte b in packet) if(Array.IndexOf(escapeChars, b) > -1) outSize++;
+
+				// Iterate through each byte and adjust
+				output = new byte[outSize];
+				int pos = 0;
+				for(int i = 0; i < packet.Length; i++) {
+					if(Array.IndexOf(escapeChars, packet[i]) > -1) {
+						output[pos++] = escapeChars[0];
+						output[pos++] = (byte) (packet[i]^filter);
+					} else output[pos++] = packet[i];
+				}
+			}
+
+			return output;
+		}
+	}
+}
