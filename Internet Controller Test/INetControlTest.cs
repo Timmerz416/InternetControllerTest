@@ -331,7 +331,7 @@ namespace InternetControllerTest {
 
 					return;	// All went well, so return and pick up the response through the event handler
 				} // TODO - ERROR HANDLING IF THE REQUEST WAS NOT SENT
-			} else Debug.Print("Incompatible RequestArgs sent to thermoStatusChanged: " + request.GetType().ToString());
+			} else Debug.Print("Incompatible RequestArgs sent to programOverride: " + request.GetType().ToString());
 
 			//-----------------------------------------------------------------
 			// Send response to the network that the command failed
@@ -343,28 +343,42 @@ namespace InternetControllerTest {
 		//=====================================================================
 		// network_thermoRuleChanged Event Handler
 		//=====================================================================
+		/// <summary>
+		/// Event handler for thermo rule status change requests.
+		/// </summary>
+		/// <param name="client">The network source of the request</param>
+		/// <param name="request">The request that was made</param>
 		static void network_thermoRuleChanged(Socket client, RequestArgs request) {
 			// Cast the request args
 			RuleChangeArgs txCmd = (request is RuleChangeArgs) ? request as RuleChangeArgs : null;
+			if(txCmd != null) {
+				//-------------------------------------------------------------
+				// Send the message
+				//-------------------------------------------------------------
+				// Create the xbee command packet
+				byte[] payload = null;
+				if(txCmd.ChangeRequested == RuleChangeArgs.Operation.Get) payload = new byte[] { CMD_RULE_CHANGE, STATUS_GET };
 
-			// Create the xbee command packet
-			byte[] cmd = null;
-			switch(txCmd.ChangeRequested) {
-				case RuleChangeArgs.Operation.Get:
-					cmd = new byte[] { CMD_RULE_CHANGE, STATUS_GET };
-					break;
-			}
+				// Send the command
+				if(SendXBeeTransmission(payload, new XBeeAddress64(RELAY_ADDRESS))) {
+					// Update the messaging status
+					awaitingResponse = true;
+					lastXBeeCommand = CMD_RULE_CHANGE;
 
-			// Create the command
-			XBeeAddress64 controller = new XBeeAddress64("00 13 A2 00 40 AE B9 7F");
-			TxRequest txTransmission = new TxRequest(controller, cmd);
+					// Get the address and port
+					IPEndPoint remoteIP = client.RemoteEndPoint as IPEndPoint;
+					requestIP = remoteIP.Address;
+					requestPort = remoteIP.Port;
 
-			// Create the command, and check that it was received
-			XBeeResponse response = xBee.Send(txTransmission).GetResponse();
-			Debug.Assert(response is TxStatusResponse);	// For debugging
-			TxStatusResponse txResponse = response as TxStatusResponse;
-			if(!txResponse.IsSuccess) Debug.Print("Error sending thermostat rule command: " + txResponse.ToString());	// TODO - DEVELOP ERROR HANDLING CODE
-			else Debug.Print("Successfully sent thermostat rule command");
+					return;	// All went well, so return and pick up the response through the event handler
+				} // TODO - ERROR HANDLING IF THE REQUEST WAS NOT SENT
+			} else Debug.Print("Incompatible RequestArgs sent to thermoRuleChanged: " + request.GetType().ToString());
+
+			//-----------------------------------------------------------------
+			// Send response to the network that the command failed
+			//-----------------------------------------------------------------			
+			string response = "PO:NACK";
+			SendNetworkRequest(response, client);
 		}
 
 		//=====================================================================
@@ -408,7 +422,7 @@ namespace InternetControllerTest {
 					else if(packet[0] == CMD_OVERRIDE) response = "PO:" + (packet[1] == CMD_ACK ? "ACK" : "NACK");
 					else if(packet[0] == CMD_RULE_CHANGE) {
 						// Create the response based on the rule command
-						if(packet[1] == STATUS_GET) response = ProcessGetRuleResults(packet);
+						if(packet[1] == STATUS_GET) response = "TR:GET:" + ProcessGetRuleResults(packet);
 						else {	// Identify error
 							Debug.Print("This rule request type has not been implemented yet.");
 							response = "TR:NACK";
@@ -423,7 +437,10 @@ namespace InternetControllerTest {
 					lastXBeeCommand = CMD_NACK;
 					requestIP = null;
 					requestPort = 0;
-				} 
+				} else {
+					// MAJOR TIME DELAY, OR CONFLICTING COMMUNICATIONS
+					Debug.Print("Didn't receive a response that was expected?");
+				}
 			} else {
 				//-------------------------------------------------------------
 				// Handle unexpected packet
@@ -461,13 +478,13 @@ namespace InternetControllerTest {
 				// Convert the arrays to floats and add to the string
 				double time = Converters.ByteToFloat(timeArray);
 				double temperature = Converters.ByteToFloat(tempArray);
-				dataStr += "-" + packetData[9 * i + 3] + ":" + time.ToString("F") + ":" + temperature.ToString("F");
+				dataStr += ":" + packetData[9 * i + 3] + "-" + time.ToString("F") + "-" + temperature.ToString("F");
 			}
 
 			//-----------------------------------------------------------------
 			// Send the data string to the requesting client via a socket
 			//-----------------------------------------------------------------
-			using(Socket netSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp)) {
+/*			using(Socket netSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp)) {
 				try {
 					// Send the data
 					netSocket.Connect(new IPEndPoint(IPAddress.Parse("192.168.2.20"), 6232));
@@ -480,9 +497,9 @@ namespace InternetControllerTest {
 				} catch(Exception e) {
 					Debug.Print("Received exception in ProcessGetRulesResult: " + e.Message);
 				}
-			}
+			}*/
 
-			return "";
+			return dataStr;
 		}
 
 		//=====================================================================
