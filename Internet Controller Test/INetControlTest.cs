@@ -290,13 +290,81 @@ namespace InternetControllerTest {
 
 					return;	// All went well, so return and pick up the response through the event handler
 				} // TODO - ERROR HANDLING IF THE REQUEST WAS NOT SENT
-			} Debug.Print("Incompatible RequestArgs sent to thermoStatusChanged: " + request.GetType().ToString());
+			} else Debug.Print("Incompatible RequestArgs sent to thermoStatusChanged: " + request.GetType().ToString());
 
 			//-----------------------------------------------------------------
 			// Send response to the network that the command failed
 			//-----------------------------------------------------------------
 			string response = "TS:NACK";
 			SendNetworkRequest(response, client);
+		}
+
+		//=====================================================================
+		// network_programOverride Event Handler
+		//=====================================================================
+		/// <summary>
+		/// Network handler when receiving program override commands
+		/// </summary>
+		/// <param name="client">The network source of the request</param>
+		/// <param name="request">The request that was made</param>
+		static void network_programOverride(Socket client, RequestArgs request) {
+			// Cast the request args
+			ProgramOverrideArgs txCmd = (request is ProgramOverrideArgs) ? request as ProgramOverrideArgs : null;
+			if(txCmd != null) {
+				//-------------------------------------------------------------
+				// Send the message
+				//-------------------------------------------------------------
+				// Create the xbee command packet
+				byte[] tempArray = Converters.FloatToByte((float) txCmd.Temperature);
+				byte[] payload = { CMD_OVERRIDE, txCmd.TurnOn ? STATUS_ON : STATUS_OFF, tempArray[0], tempArray[1], tempArray[2], tempArray[3] };
+
+				// Send the command
+				if(SendXBeeTransmission(payload, new XBeeAddress64(RELAY_ADDRESS))) {
+					// Update the messaging status
+					awaitingResponse = true;
+					lastXBeeCommand = CMD_OVERRIDE;
+
+					// Get the address and port
+					IPEndPoint remoteIP = client.RemoteEndPoint as IPEndPoint;
+					requestIP = remoteIP.Address;
+					requestPort = remoteIP.Port;
+
+					return;	// All went well, so return and pick up the response through the event handler
+				} // TODO - ERROR HANDLING IF THE REQUEST WAS NOT SENT
+			} else Debug.Print("Incompatible RequestArgs sent to thermoStatusChanged: " + request.GetType().ToString());
+
+			//-----------------------------------------------------------------
+			// Send response to the network that the command failed
+			//-----------------------------------------------------------------			
+			string response = "PO:NACK";
+			SendNetworkRequest(response, client);
+		}
+
+		//=====================================================================
+		// network_thermoRuleChanged Event Handler
+		//=====================================================================
+		static void network_thermoRuleChanged(Socket client, RequestArgs request) {
+			// Cast the request args
+			RuleChangeArgs txCmd = (request is RuleChangeArgs) ? request as RuleChangeArgs : null;
+
+			// Create the xbee command packet
+			byte[] cmd = null;
+			switch(txCmd.ChangeRequested) {
+				case RuleChangeArgs.Operation.Get:
+					cmd = new byte[] { CMD_RULE_CHANGE, STATUS_GET };
+					break;
+			}
+
+			// Create the command
+			XBeeAddress64 controller = new XBeeAddress64("00 13 A2 00 40 AE B9 7F");
+			TxRequest txTransmission = new TxRequest(controller, cmd);
+
+			// Create the command, and check that it was received
+			XBeeResponse response = xBee.Send(txTransmission).GetResponse();
+			Debug.Assert(response is TxStatusResponse);	// For debugging
+			TxStatusResponse txResponse = response as TxStatusResponse;
+			if(!txResponse.IsSuccess) Debug.Print("Error sending thermostat rule command: " + txResponse.ToString());	// TODO - DEVELOP ERROR HANDLING CODE
+			else Debug.Print("Successfully sent thermostat rule command");
 		}
 
 		//=====================================================================
@@ -524,65 +592,6 @@ namespace InternetControllerTest {
 				Debug.Print("Could not send the sensor data to the database");
 				// TODO - ADD ERROR HANDLING
 			}
-		}
-
-		//=====================================================================
-		// network_programOverride Event Handler
-		//=====================================================================
-		static void network_programOverride(Socket client, RequestArgs request) {
-			// Cast the request args
-			ProgramOverrideArgs txCmd = (request is ProgramOverrideArgs) ? request as ProgramOverrideArgs : null;
-
-			// Create the xbee command packet
-			byte[] tempArray = Converters.FloatToByte((float) txCmd.Temperature);
-			byte[] cmd = { CMD_OVERRIDE, txCmd.TurnOn ? STATUS_ON : STATUS_OFF, tempArray[0], tempArray[1], tempArray[2], tempArray[3] };
-
-			// Create the command
-			XBeeAddress64 controller = new XBeeAddress64("00 13 A2 00 40 AE B9 7F");
-			TxRequest txTransmission = new TxRequest(controller, cmd);
-
-			// Enter the loop to send the command
-			bool cmdSent = false;
-			while(!cmdSent) {
-				try {
-					// Create the command, and check that it was received
-					XBeeResponse response = xBee.Send(txTransmission).GetResponse();
-					Debug.Assert(response is TxStatusResponse);	// For debugging
-					TxStatusResponse txResponse = response as TxStatusResponse;
-					if(!txResponse.IsSuccess) Debug.Print("Error sending program override command: " + txResponse.ToString());	// TODO - DEVELOP ERROR HANDLING CODE
-					else Debug.Print("Successfully sent program override command");
-				} catch(XBeeTimeoutException) {
-					Debug.Print("Timeout sending message, will try again");
-					Thread.Sleep(100);
-				}
-			}
-		}
-
-		//=====================================================================
-		// network_thermoRuleChanged Event Handler
-		//=====================================================================
-		static void network_thermoRuleChanged(Socket client, RequestArgs request) {
-			// Cast the request args
-			RuleChangeArgs txCmd = (request is RuleChangeArgs) ? request as RuleChangeArgs : null;
-
-			// Create the xbee command packet
-			byte[] cmd = null;
-			switch(txCmd.ChangeRequested) {
-				case RuleChangeArgs.Operation.Get:
-					cmd = new byte[] { CMD_RULE_CHANGE, STATUS_GET };
-					break;
-			}
-
-			// Create the command
-			XBeeAddress64 controller = new XBeeAddress64("00 13 A2 00 40 AE B9 7F");
-			TxRequest txTransmission = new TxRequest(controller, cmd);
-
-			// Create the command, and check that it was received
-			XBeeResponse response = xBee.Send(txTransmission).GetResponse();
-			Debug.Assert(response is TxStatusResponse);	// For debugging
-			TxStatusResponse txResponse = response as TxStatusResponse;
-			if(!txResponse.IsSuccess) Debug.Print("Error sending thermostat rule command: " + txResponse.ToString());	// TODO - DEVELOP ERROR HANDLING CODE
-			else Debug.Print("Successfully sent thermostat rule command");
 		}
 
 		//=====================================================================
