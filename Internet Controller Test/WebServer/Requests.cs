@@ -137,10 +137,80 @@ namespace InternetControllerTest {
 		}
 	}
 
+	//=========================================================================
+	// DataRequestArgs Class
+	//=========================================================================
+	/// <summary>
+	/// This class handles any requests for data from the relay
+	/// </summary>
 	public class DataRequestArgs : RequestArgs {
 		public DataRequestArgs(char[] Data) : base(Data) { }
 	}
 
+	//=========================================================================
+	// TimeRequestArgs Class
+	//=========================================================================
+	/// <summary>
+	/// This class handles any requests for time settings from the relay
+	/// </summary>
+	public class TimeRequestArgs : RequestArgs {
+		//=====================================================================
+		// CLASS ENUMERATIONS
+		//=====================================================================
+		public enum Operations { Get, Set };
+
+		//=====================================================================
+		// CLASS MEMBERS
+		//=====================================================================
+		public Operations Request { get; private set; }
+		public byte Seconds { get; private set; }
+		public byte Minutes { get; private set; }
+		public byte Hours { get; private set; }
+		public byte Day { get; private set; }
+		public byte Month { get; private set; }
+		public byte Year { get; private set; }
+		public byte Weekday { get; private set; }
+
+		//=====================================================================
+		// Default Constructor
+		//=====================================================================
+		/// <summary>
+		/// This class will read the request and covert the data correcting into the object
+		/// </summary>
+		/// <param name="Data">The received request</param>
+		public TimeRequestArgs(char[] Data) : base(Data) {
+			// Check the command
+			string CMD = _args[1].ToUpper();
+			switch(CMD) {
+				case "GET":	// Get the current time from the relay clock
+					Request = Operations.Get;
+					break;
+				case "SET":	// Set the time on the relay clock
+					// Check number of arguments
+					if(_args.Length != 9) throw new ArgumentException("Incorrect number of arguments sent to time request");
+
+					// Get the data
+					Request = Operations.Set;
+					Seconds = byte.Parse(_args[2]);
+					Minutes = byte.Parse(_args[3]);
+					Hours = byte.Parse(_args[4]);
+					Weekday = byte.Parse(_args[5]);
+					Day = byte.Parse(_args[6]);
+					Month = byte.Parse(_args[7]);
+					Year = byte.Parse(_args[8]);
+					break;
+				default:	// Something else sent
+					throw new ArgumentException("Time Command '" + CMD + "' Not Currently Handled.");
+			}
+		}
+	}
+
+	//=========================================================================
+	// TemperatureRule Class
+	//=========================================================================
+	/// <summary>
+	/// 
+	/// </summary>
 	public class TemperatureRule {
 		private const int PACKET_LENGTH	= 9;
 		private const int FLOAT_LENGTH	= 4;

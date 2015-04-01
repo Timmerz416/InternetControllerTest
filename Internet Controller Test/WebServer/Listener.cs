@@ -23,6 +23,7 @@ namespace InternetControllerTest {
 		public event RequestReceivedHandler programOverrideRequested;
 		public event RequestReceivedHandler thermoRuleChanged;
 		public event RequestReceivedHandler dataRequested;
+		public event RequestReceivedHandler timeRequestReceived;
 
 		// Constructor
 		public SocketListener(int PortNumber) {
@@ -77,6 +78,8 @@ namespace InternetControllerTest {
 							if(thermoRuleChanged != null) thermoRuleChanged(clientSocket, new RuleChangeArgs(cmd));
 						} else if(code == "DR") {	// Data request
 							if(dataRequested != null) dataRequested(clientSocket, new DataRequestArgs(cmd));
+						} else if(code == "CR") {	// Time request
+							if(timeRequestReceived != null) timeRequestReceived(clientSocket, new TimeRequestArgs(cmd));
 						}
 					} else Debug.Print("Number of identified bytes is less than needed for this hardware.");
 				}

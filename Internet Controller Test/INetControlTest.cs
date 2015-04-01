@@ -32,6 +32,7 @@ namespace InternetControllerTest {
 		private const string DB_ADDRESS = "192.168.2.53";	// The address to the server with the MySQL server
 		private const int DB_PORT = 80;						// The port to send the webserver request to
 		private const int LISTENING_PORT = 5267;			// The port that the microcontroller will listen for commands
+		private const int SERVER_PORT = 6232;				// The listening port of the source commands
 
 		//=====================================================================
 		// XBEE SETUP
@@ -44,6 +45,7 @@ namespace InternetControllerTest {
 		const byte CMD_OVERRIDE		= 2;
 		const byte CMD_RULE_CHANGE	= 3;
 		const byte CMD_SENSOR_DATA	= 4;
+		const byte CMD_TIME_REQUEST	= 5;
 
 		// XBee subcommand codes
 		const byte CMD_NACK			= 0;
@@ -89,6 +91,7 @@ namespace InternetControllerTest {
 			network.programOverrideRequested += network_programOverride;
 			network.thermoRuleChanged += network_thermoRuleChanged;
 			network.dataRequested += network_dataRequested;
+			network.timeRequestReceived += network_timeRequestReceived;
 
 			//-----------------------------------------------------------------
 			// Initialize the XBee communications
@@ -174,7 +177,7 @@ namespace InternetControllerTest {
 		/// <returns>If the send was successful or not</returns>
 		private static bool SendNetworkRequest(string message, IPAddress address, int port) {
 			// Send request of the network
-/*			using(Socket client = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp)) {
+			using(Socket client = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp)) {
 				try {
 					client.Connect(new IPEndPoint(address, port));	// Connect to endpoint
 					using(NetworkStream netStream = new NetworkStream(client)) {
@@ -185,7 +188,7 @@ namespace InternetControllerTest {
 					Debug.Print("Follow message returned when trying to send request: " + issue.Message);
 					return false;
 				}
-			}*/
+			}
 
 			// Print string to debug console
 			Debug.Print("The following message was sent to " + address.ToString() + ":" + port.ToString() + " => " + message);
@@ -382,6 +385,51 @@ namespace InternetControllerTest {
 		}
 
 		//=====================================================================
+		// network_timeRequestReceived
+		//=====================================================================
+		static void network_timeRequestReceived(Socket client, RequestArgs request) {
+			// Cast the request args
+			TimeRequestArgs txCmd = (request is TimeRequestArgs) ? request as TimeRequestArgs : null;
+			if(txCmd != null) {
+				//-------------------------------------------------------------
+				// Send the message
+				//-------------------------------------------------------------
+				// Create the xbee command packet
+				byte[] payload = null;
+				switch(txCmd.Request) {
+					case TimeRequestArgs.Operations.Get:	// Get the current time
+						payload = new byte[] { CMD_TIME_REQUEST, STATUS_GET };
+						break;
+					case TimeRequestArgs.Operations.Set:	// Set the relay time
+						payload = new byte[] { CMD_TIME_REQUEST, STATUS_UPDATE, txCmd.Seconds, txCmd.Minutes, txCmd.Hours, txCmd.Weekday, txCmd.Day, txCmd.Month, txCmd.Year };
+						break;
+					default:	// TODO - ERROR HANDLING BY SENDING RESPONSE TO THE SOURCE
+						break;
+				}
+
+				// Send the command
+				if(SendXBeeTransmission(payload, new XBeeAddress64(RELAY_ADDRESS))) {
+					// Update the messaging status
+					awaitingResponse = true;
+					lastXBeeCommand = CMD_TIME_REQUEST;
+
+					// Get the address and port
+					IPEndPoint remoteIP = client.RemoteEndPoint as IPEndPoint;
+					requestIP = remoteIP.Address;
+					requestPort = remoteIP.Port;
+
+					return;	// All went well, so return and pick up the response through the event handler
+				} // TODO - ERROR HANDLING IF THE REQUEST WAS NOT SENT
+			} else Debug.Print("Incompatible RequestArgs sent to timeRequestReceived: " + request.GetType().ToString());
+
+			//-----------------------------------------------------------------
+			// Send response to the network that the command failed
+			//-----------------------------------------------------------------			
+			string response = "CR:NACK";
+			SendNetworkRequest(response, client);
+		}
+
+		//=====================================================================
 		// xBee_PacketReceived
 		//=====================================================================
 		/// <summary>
@@ -418,19 +466,45 @@ namespace InternetControllerTest {
 					string response = "";
 
 					// Check the packet type
-					if(packet[0] == CMD_THERMO_POWER) response = "TS:" + (packet[1] == CMD_ACK ? "ACK" : "NACK");
-					else if(packet[0] == CMD_OVERRIDE) response = "PO:" + (packet[1] == CMD_ACK ? "ACK" : "NACK");
-					else if(packet[0] == CMD_RULE_CHANGE) {
-						// Create the response based on the rule command
-						if(packet[1] == STATUS_GET) response = "TR:GET:" + ProcessGetRuleResults(packet);
-						else {	// Identify error
-							Debug.Print("This rule request type has not been implemented yet.");
-							response = "TR:NACK";
-						}
+					switch(packet[0]) {
+						case CMD_THERMO_POWER:
+							response = "TS:" + (packet[1] == CMD_ACK ? "ACK" : "NACK");
+							break;
+						case CMD_OVERRIDE:
+							response = "PO:" + (packet[1] == CMD_ACK ? "ACK" : "NACK");
+							break;
+						case CMD_RULE_CHANGE:
+							// Create the response based on the rule command
+							if(packet[1] == STATUS_GET) response = "TR:GET:" + ProcessGetRuleResults(packet);
+							else {	// Identify error
+								Debug.Print("This rule request type has not been implemented yet.");
+								response = "TR:NACK";
+							}
+							break;
+						case CMD_TIME_REQUEST:
+							// Create message based on command type
+							switch(packet[1]) {
+								case STATUS_GET:
+									response = "CR";
+									for(int i = 2; i < packet.Length; i++) response += ":" + packet[i].ToString();
+									break;
+								case STATUS_UPDATE:
+									response = "CR:" + (packet[2] == CMD_ACK ? "ACK" : "NACK");
+									break;
+								default:
+									Debug.Print("This type of Time Request command (" + packet[1] + ") does not exist!");
+									response = "CR:NACK";
+									break;
+							}
+							break;
+						default:
+							// This command doesn't exist
+							Debug.Print("Command " + packet[0] + " not implemented - this shouldn't have happened!");
+							break;
 					}
 
 					// Send the response
-					SendNetworkRequest(response, requestIP, requestPort);
+					SendNetworkRequest(response, requestIP, SERVER_PORT);
 
 					// Reset the messaging tracking
 					awaitingResponse = false;
