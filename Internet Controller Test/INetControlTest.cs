@@ -387,6 +387,11 @@ namespace InternetControllerTest {
 		//=====================================================================
 		// network_timeRequestReceived
 		//=====================================================================
+		/// <summary>
+		/// Event handler for timekeeping requests.
+		/// </summary>
+		/// <param name="client">The network source of the request</param>
+		/// <param name="request">The request that was made</param>
 		static void network_timeRequestReceived(Socket client, RequestArgs request) {
 			// Cast the request args
 			TimeRequestArgs txCmd = (request is TimeRequestArgs) ? request as TimeRequestArgs : null;
@@ -554,24 +559,6 @@ namespace InternetControllerTest {
 				double temperature = Converters.ByteToFloat(tempArray);
 				dataStr += ":" + packetData[9 * i + 3] + "-" + time.ToString("F") + "-" + temperature.ToString("F");
 			}
-
-			//-----------------------------------------------------------------
-			// Send the data string to the requesting client via a socket
-			//-----------------------------------------------------------------
-/*			using(Socket netSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp)) {
-				try {
-					// Send the data
-					netSocket.Connect(new IPEndPoint(IPAddress.Parse("192.168.2.20"), 6232));
-					using(NetworkStream outStream = new NetworkStream(netSocket)) {
-						// Convert the string to a byte array
-						byte[] buffer = Toolbox.NETMF.Tools.Chars2Bytes(dataStr.ToCharArray());
-						outStream.Write(buffer, 0, buffer.Length);
-					}
-					Debug.Print("Sent message: " + dataStr);
-				} catch(Exception e) {
-					Debug.Print("Received exception in ProcessGetRulesResult: " + e.Message);
-				}
-			}*/
 
 			return dataStr;
 		}
