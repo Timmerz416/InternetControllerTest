@@ -109,15 +109,43 @@ namespace InternetControllerTest {
 		public RuleChangeArgs(char[] Data) : base(Data) {
 			// The number of args depends on the requested operation
 			string CMD = _args[1].ToUpper();
-			if(CMD == "GET") {
-				_operation = Operation.Get;
-				_pos1 = _pos2 = 0;
-				_rule = null;
-			} else if(CMD == "ADD") {
-			} else if(CMD == "DELETE") {
-			} else if(CMD == "MOVE") {
-			} else if(CMD == "UPDATE") {
-			} else throw new ArgumentException("Rule Change Command '" + CMD + "' Not Currently Handled.");
+			switch(CMD) {
+				case "GET":	// Get the current list of rules
+					_operation = Operation.Get;
+					_pos1 = _pos2 = 0;	// Meaningless
+					_rule = null;	// Meaningless
+					break;
+				case "ADD":	// Add a new rule before the insert position (-1 corresponds to the last item)
+					if(_args.Length != 6) throw new ArgumentException("Adding a new rule requires 6 arguments");
+					_operation = Operation.Add;
+					_pos1 = byte.Parse(_args[2]);	// Lists the insert position
+					_pos2 = 0;	// Meaningless
+					_rule = new TemperatureRule((TemperatureRule.DayType) int.Parse(_args[3]), (float) double.Parse(_args[4]), (float) double.Parse(_args[5]));
+					break;
+				case "DELETE":	// Delete the rule at the specified index
+					if(_args.Length != 3) throw new ArgumentException("Deleting a rule requires 3 arguments.");
+					_operation = Operation.Delete;
+					_pos1 = byte.Parse(_args[2]);	// Lists the element to delete
+					_pos2 = 0;	// Meaningless
+					_rule = null;	// Meaningless
+					break;
+				case "MOVE":	// Move the specified rule to the new index
+					if(_args.Length != 4) throw new ArgumentException("Moving a rule requires 4 arguments.");
+					_operation = Operation.Move;
+					_pos1 = byte.Parse(_args[2]);	// The index of the rule to move
+					_pos2 = byte.Parse(_args[3]);	// The index of the new position
+					_rule = null;	// Meaningless
+					break;
+				case "UPDATE":	// Update the rule at the specified index
+					if(_args.Length != 6) throw new ArgumentException("Updating a rule requires 6 arguments");
+					_operation = Operation.Update;
+					_pos1 = byte.Parse(_args[2]);	// Lists the update index
+					_pos2 = 0;	// Meaningless
+					_rule = new TemperatureRule((TemperatureRule.DayType) int.Parse(_args[3]), (float) double.Parse(_args[4]), (float) double.Parse(_args[5]));
+					break;
+				default:
+					throw new ArgumentException("Rule Change Command '" + CMD + "' Not Currently Handled.");
+			}
 		}
 
 		public Operation ChangeRequested {

@@ -472,20 +472,40 @@ namespace InternetControllerTest {
 
 					// Check the packet type
 					switch(packet[0]) {
+						//-----------------------------------------------------
 						case CMD_THERMO_POWER:
 							response = "TS:" + (packet[1] == CMD_ACK ? "ACK" : "NACK");
 							break;
+						//-----------------------------------------------------
 						case CMD_OVERRIDE:
 							response = "PO:" + (packet[1] == CMD_ACK ? "ACK" : "NACK");
 							break;
+						//-----------------------------------------------------
 						case CMD_RULE_CHANGE:
 							// Create the response based on the rule command
-							if(packet[1] == STATUS_GET) response = "TR:GET:" + ProcessGetRuleResults(packet);
-							else {	// Identify error
-								Debug.Print("This rule request type has not been implemented yet.");
-								response = "TR:NACK";
+							switch(packet[1]) {
+								case STATUS_GET:
+									response = "TR:GET:" + ProcessGetRuleResults(packet);
+									break;
+								case STATUS_ADD:
+									response = "TR:ADD:" + (packet[2] == CMD_ACK ? "ACK" : "NACK");
+									break;
+								case STATUS_DELETE:
+									response = "TR:DELETE:" + (packet[2] == CMD_ACK ? "ACK" : "NACK");
+									break;
+								case STATUS_MOVE:
+									response = "TR:MOVE:" + (packet[2] == CMD_ACK ? "ACK" : "NACK");
+									break;
+								case STATUS_UPDATE:
+									response = "TR:UPDATE:" + (packet[2] == CMD_ACK ? "ACK" : "NACK");
+									break;
+								default:
+									Debug.Print("This rule request type has not been implemented yet.");
+									response = "TR:NACK";
+									break;
 							}
 							break;
+						//-----------------------------------------------------
 						case CMD_TIME_REQUEST:
 							// Create message based on command type
 							switch(packet[1]) {
@@ -502,6 +522,7 @@ namespace InternetControllerTest {
 									break;
 							}
 							break;
+						//-----------------------------------------------------
 						default:
 							// This command doesn't exist
 							Debug.Print("Command " + packet[0] + " not implemented - this shouldn't have happened!");
