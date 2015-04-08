@@ -387,6 +387,20 @@ namespace InternetControllerTest {
 					case RuleChangeArgs.Operation.Move:
 						break;
 					case RuleChangeArgs.Operation.Update:
+						// Convert the floats
+						timeArray = Converters.FloatToByte(txCmd.Rule.Time);
+						tempArray = Converters.FloatToByte(txCmd.Rule.Temperature);
+
+						// Create the payload
+						payload = new byte[12];
+						payload[0] = CMD_RULE_CHANGE;
+						payload[1] = STATUS_UPDATE;
+						payload[2] = txCmd.FirstPosition;
+						payload[3] = (byte)txCmd.Rule.Days;
+						for(int i = 0; i < 4; i++) {
+							payload[4 + i] = timeArray[i];
+							payload[8 + i] = tempArray[i];
+						}
 						break;
 				}
 
