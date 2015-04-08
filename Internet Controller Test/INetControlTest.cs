@@ -360,7 +360,33 @@ namespace InternetControllerTest {
 				//-------------------------------------------------------------
 				// Create the xbee command packet
 				byte[] payload = null;
-				if(txCmd.ChangeRequested == RuleChangeArgs.Operation.Get) payload = new byte[] { CMD_RULE_CHANGE, STATUS_GET };
+				switch(txCmd.ChangeRequested) {
+					case RuleChangeArgs.Operation.Get:
+						payload = new byte[] { CMD_RULE_CHANGE, STATUS_GET };
+						break;
+					case RuleChangeArgs.Operation.Add:
+						// Convert the floats
+						byte[] timeArray = Converters.FloatToByte(txCmd.Rule.Time);
+						byte[] tempArray = Converters.FloatToByte(txCmd.Rule.Temperature);
+
+						// Create the payload
+						payload = new byte[12];
+						payload[0] = CMD_RULE_CHANGE;
+						payload[1] = STATUS_ADD;
+						payload[2] = txCmd.FirstPosition;
+						payload[3] = (byte) txCmd.Rule.Days;
+						for(int i = 0; i < 4; i++) {
+							payload[4 + i] = timeArray[i];
+							payload[8 + i] = tempArray[i];
+						}
+						break;
+					case RuleChangeArgs.Operation.Delete:
+						break;
+					case RuleChangeArgs.Operation.Move:
+						break;
+					case RuleChangeArgs.Operation.Update:
+						break;
+				}
 
 				// Send the command
 				if(SendXBeeTransmission(payload, new XBeeAddress64(RELAY_ADDRESS))) {
