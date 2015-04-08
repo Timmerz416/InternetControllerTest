@@ -381,6 +381,8 @@ namespace InternetControllerTest {
 						}
 						break;
 					case RuleChangeArgs.Operation.Delete:
+						// Create the payload
+						payload = new byte[] { CMD_RULE_CHANGE, STATUS_DELETE, txCmd.FirstPosition };
 						break;
 					case RuleChangeArgs.Operation.Move:
 						break;
