@@ -385,6 +385,8 @@ namespace InternetControllerTest {
 						payload = new byte[] { CMD_RULE_CHANGE, STATUS_DELETE, txCmd.FirstPosition };
 						break;
 					case RuleChangeArgs.Operation.Move:
+						// Create the payload
+						payload = new byte[] { CMD_RULE_CHANGE, STATUS_MOVE, txCmd.FirstPosition, txCmd.SecondPosition };
 						break;
 					case RuleChangeArgs.Operation.Update:
 						// Convert the floats
